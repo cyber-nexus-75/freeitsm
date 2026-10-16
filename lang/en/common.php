@@ -69,6 +69,16 @@ return [
         'azure_deployment_help' => 'The name YOU gave the deployment, which need not match the model it runs. This replaces the model box — on a deployment endpoint the deployment decides the model.',
         'azure_api_version'     => 'API version',
         'azure_api_version_help'=> 'The api-version at the end of the deployment\'s Target URI - not the date beside the model, which is the model\'s own version. Leave it blank to use 2024-02-01, or enter v1 for Azure\'s newer route.',
+
+        // A custom OpenAI-compatible server: a local runner (Ollama, LM Studio,
+        // vLLM) or any hosted API that speaks the OpenAI wire format, such as
+        // Mistral. The key is OPTIONAL for this provider — most local runners
+        // have none.
+        'provider_custom'      => 'Custom (OpenAI-compatible — your own server)',
+        'custom_base_url'      => 'Base URL',
+        'custom_base_url_help' => 'The server\'s OpenAI-compatible base address, e.g. http://localhost:11434/v1 (Ollama), http://localhost:1234/v1 (LM Studio) or https://api.mistral.ai/v1 (Mistral). Pasting the full /chat/completions address is fine too.',
+        'api_key_optional_help'=> 'Optional. Leave blank for a server with no key (most local runners); sent as a Bearer token when filled.',
+        'custom_model_hint'    => 'Type the model exactly as the server lists it, e.g. llama3.1 or mistral-small-latest.',
         'model'               => 'Model',
         'model_placeholder'   => 'Type or pick a model…',
         'model_set'           => 'Model',

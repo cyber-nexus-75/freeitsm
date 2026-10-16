@@ -31,6 +31,12 @@
  *                   {endpoint}/openai/v1/chat/completions, which takes no
  *                   query string and DOES want the deployment as `model`
  *                   (GH #171).
+ *   - custom      → POST {custom_base_url}/chat/completions
+ *                   Any server that speaks the OpenAI chat-completions wire
+ *                   format: local runners (Ollama, LM Studio, vLLM) and hosted
+ *                   APIs that are not among the named providers (Mistral).
+ *                   The key is OPTIONAL — most local runners have none — so
+ *                   no Authorization header is sent when there is no key.
  *
  * Request shapes mirror the proven ones in includes/rfp_ai.php; this file is
  * intentionally independent so the RFP builder isn't affected.
@@ -41,7 +47,7 @@ require_once __DIR__ . '/encryption.php';
 const AI_PROVIDER_RETRY_MAX        = 3;
 const AI_PROVIDER_RETRY_BACKOFF_MS = 2000;
 const AI_PROVIDER_HTTP_TIMEOUT     = 120;
-const AI_PROVIDER_VALID            = ['anthropic', 'openai', 'openrouter', 'azure'];
+const AI_PROVIDER_VALID            = ['anthropic', 'openai', 'openrouter', 'azure', 'custom'];
 
 /** Used when an Azure config names no api-version. A widely-deployed, stable one. */
 const AI_AZURE_DEFAULT_API_VERSION = '2024-02-01';
@@ -73,7 +79,10 @@ function aiProviderChat(array $cfg, array $opts): array
     if (!in_array($provider, AI_PROVIDER_VALID, true)) {
         throw new RuntimeException('Unknown AI provider: ' . $provider);
     }
-    if ($apiKey === '') {
+    /* ⚠️ A custom server's key is OPTIONAL: most local runners (Ollama, LM
+       Studio, vLLM) have no key at all, and refusing an empty one would make
+       the one provider that needs no key the only one that demands it. */
+    if ($apiKey === '' && $provider !== 'custom') {
         throw new RuntimeException('No API key configured.');
     }
     /* ⚠️ Azure names a DEPLOYMENT rather than a model, so it is checked against
@@ -87,8 +96,17 @@ function aiProviderChat(array $cfg, array $opts): array
         if (trim((string)($cfg['azure_deployment'] ?? '')) === '') {
             throw new RuntimeException('No Azure deployment name configured.');
         }
-    } elseif ($model === '') {
-        throw new RuntimeException('No model configured.');
+    } else {
+        /* A custom server is named by its ADDRESS, and its key is optional
+           (checked above), so the base URL is the field to name when it is
+           empty — "No API key configured" would send somebody hunting for a
+           box that is not on their screen. */
+        if ($provider === 'custom' && trim((string)($cfg['custom_base_url'] ?? '')) === '') {
+            throw new RuntimeException('No base URL configured.');
+        }
+        if ($model === '') {
+            throw new RuntimeException('No model configured.');
+        }
     }
 
     $opts['max_tokens']  = $opts['max_tokens']  ?? 1024;
@@ -122,20 +140,29 @@ function aiProviderChat(array $cfg, array $opts): array
             $opts
         );
     } else {
-        // openai + openrouter share the OpenAI-compatible chat-completions wire format
+        // openai + openrouter + custom share the OpenAI-compatible chat-completions wire format
         $base = $provider === 'openrouter'
             ? ($cfg['base_url'] ?? AI_OPENROUTER_BASE)
-            : ($cfg['base_url'] ?? AI_OPENAI_BASE);
+            : ($provider === 'custom'
+                ? aiCustomChatUrl($cfg)
+                : ($cfg['base_url'] ?? AI_OPENAI_BASE));
         $extraHeaders = [];
         if ($provider === 'openrouter') {
             // Optional attribution headers — surface the app on the OpenRouter dashboard.
             $extraHeaders[] = 'HTTP-Referer: ' . ($opts['referer'] ?? 'https://freeitsm.co.uk');
             $extraHeaders[] = 'X-Title: ' . ($opts['title'] ?? 'FreeITSM');
         }
+        /* ⚠️ A custom server's key is OPTIONAL, and an empty
+           'Authorization: Bearer' is worse than no header at all — a server
+           with no key would try (and fail) to authenticate an empty token. So
+           the header is built only when a key exists. */
+        $authHeaders = ($provider === 'custom' && $apiKey === '')
+            ? []
+            : ['Authorization: Bearer ' . $apiKey];
         $result = aiProviderCallOpenAICompatible(
-            rtrim($base, '/') . '/chat/completions',
+            $provider === 'custom' ? $base : rtrim($base, '/') . '/chat/completions',
             $model,
-            ['Authorization: Bearer ' . $apiKey],
+            $authHeaders,
             $verify,
             $opts,
             $extraHeaders
@@ -265,6 +292,26 @@ function aiAzureApiVersionLooksValid(string $v): bool
     if ($v === '' || in_array($v, ['v1', 'latest', 'preview'], true)) return true;
     if (preg_match('/^\d{4}-\d{2}-\d{2}-preview$/', $v)) return true;
     return in_array($v, ['2022-12-01', '2023-05-15', '2024-02-01', '2024-06-01', '2024-10-21'], true);
+}
+
+/**
+ * Build the chat-completions URL for a custom OpenAI-compatible server.
+ *
+ * Mirrors aiAzureChatUrl()'s mercy: the address is typed by hand, so a trailing
+ * slash — or a whole endpoint pasted out of a server's own docs — is the same
+ * intention and must not become a doubled path. Everything from the base
+ * onwards is ours to build.
+ *
+ * @param array $cfg  the AI settings - custom_base_url is read
+ */
+function aiCustomChatUrl(array $cfg): string
+{
+    $base = trim((string)($cfg['custom_base_url'] ?? ''));
+    $base = rtrim($base, '/');
+    if (substr($base, -17) === '/chat/completions') {
+        $base = substr($base, 0, -17);
+    }
+    return $base . '/chat/completions';
 }
 
 /**
@@ -445,6 +492,12 @@ function aiExplainFailure(array $cfg, string $msg): string
         return 'This model needs a newer API version than the one in use. Copy the api-version from the end of the deployment\'s Target URI in the portal, or enter v1.';
     }
     if (strpos($msg, '(HTTP 404)') !== false) {
+        /* A custom server's 404 is usually one of two things: a model name the
+           server does not have, or an address missing the /v1 nearly every
+           OpenAI-compatible server serves its models under. Name both. */
+        if ($provider === 'custom') {
+            return 'The server at "' . trim((string)($cfg['custom_base_url'] ?? '')) . '" did not recognise the model "' . trim((string)($cfg['model'] ?? '')) . '" or the address. Most OpenAI-compatible servers serve their models under /v1 (Ollama: http://localhost:11434/v1) - check the address against the server\'s own docs and the model name against its model list.';
+        }
         if (!$azure) {
             return 'The provider does not recognise the model "' . trim((string)($cfg['model'] ?? '')) . '". Check its exact name in the provider\'s model list.';
         }
@@ -510,12 +563,15 @@ function aiProviderChatTools(array $cfg, array $opts, array $tools, callable $ru
     $verify   = !empty($cfg['verify_ssl']);
 
     if (!in_array($provider, AI_PROVIDER_VALID, true)) throw new RuntimeException('Unknown AI provider: ' . $provider);
-    if ($apiKey === '') throw new RuntimeException('No API key configured.');
+    if ($apiKey === '' && $provider !== 'custom') throw new RuntimeException('No API key configured.');
     if ($provider === 'azure') {
         if (trim((string)($cfg['azure_endpoint'] ?? '')) === '' || trim((string)($cfg['azure_deployment'] ?? '')) === '') {
             throw new RuntimeException('No Azure endpoint or deployment configured.');
         }
         $model = trim((string)$cfg['azure_deployment']);
+    }
+    if ($provider === 'custom' && trim((string)($cfg['custom_base_url'] ?? '')) === '') {
+        throw new RuntimeException('No base URL configured.');
     }
     if ($model  === '') throw new RuntimeException('No model configured.');
     // Earlier turns of the conversation (3.3.0), text only, oldest first.
@@ -621,7 +677,14 @@ function aiProviderChatTools(array $cfg, array $opts, array $tools, callable $ru
     // ── OpenAI-compatible (openai, openrouter, and azure at its own address) ──
     $base = $provider === 'openrouter'
         ? ($cfg['base_url'] ?? AI_OPENROUTER_BASE)
-        : ($cfg['base_url'] ?? AI_OPENAI_BASE);
+        : ($provider === 'custom'
+            ? aiCustomChatUrl($cfg)
+            : ($cfg['base_url'] ?? AI_OPENAI_BASE));
+    /* A custom server's key is optional - no Authorization header at all when
+       there is none. */
+    $authHeaders = $provider === 'custom' && $apiKey === ''
+        ? []
+        : ['Authorization: Bearer ' . $apiKey];
     $extraHeaders = [];
     if ($provider === 'openrouter') {
         $extraHeaders[] = 'HTTP-Referer: ' . ($opts['referer'] ?? 'https://freeitsm.co.uk');
@@ -652,10 +715,13 @@ function aiProviderChatTools(array $cfg, array $opts, array $tools, callable $ru
             if (!aiAzureIsV1($cfg)) unset($payload['model']);
             $resp = aiOpenAICompatPost(aiAzureChatUrl($cfg), ['api-key: ' . $apiKey, 'content-type: application/json'], $payload, $verify);
         } else {
-            $resp = aiOpenAICompatPost(rtrim($base, '/') . '/chat/completions', array_merge([
-                'Authorization: Bearer ' . $apiKey,
-                'content-type: application/json',
-            ], $extraHeaders), $payload, $verify);
+            $headers = array_merge($authHeaders, ['content-type: application/json'], $extraHeaders);
+            $resp = aiOpenAICompatPost(
+                $provider === 'custom' ? $base : rtrim($base, '/') . '/chat/completions',
+                $headers,
+                $payload,
+                $verify
+            );
         }
         $params = array_intersect_key($payload, array_flip(['max_tokens', 'max_completion_tokens', 'temperature']));
         $data = $resp['data'];

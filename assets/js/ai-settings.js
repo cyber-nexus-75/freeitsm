@@ -70,18 +70,23 @@
         var modelHint  = panel.querySelector('[data-ai-model-hint]');
         var keyEl      = panel.querySelector('[data-ai-key]');
         var keyHint    = panel.querySelector('[data-ai-key-hint]');
+        // The server-rendered help, so switching away from Custom can put it back.
+        var keyHintDefault = keyHint ? keyHint.textContent : '';
         var noteEl     = panel.querySelector('[data-ai-openrouter-note]');
         // Azure OpenAI deployment-based endpoints (discussion #86).
         var azureBox   = panel.querySelector('[data-ai-azure]');
         var azEndpoint = panel.querySelector('[data-ai-azure-endpoint]');
         var azDeploy   = panel.querySelector('[data-ai-azure-deployment]');
         var azVersion  = panel.querySelector('[data-ai-azure-api-version]');
+        // A custom OpenAI-compatible server: local runner or self-hosted API.
+        var customBox  = panel.querySelector('[data-ai-custom]');
+        var customUrl = panel.querySelector('[data-ai-custom-base-url]');
         var modelGroup = panel.querySelector('[data-ai-model-group]');
         var saveBtn    = panel.querySelector('[data-ai-save]');
         var testBtn    = panel.querySelector('[data-ai-test]');
         var resultEl   = panel.querySelector('[data-ai-result]');
 
-        var defaults = { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o', openrouter: '' };
+        var defaults = { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o', openrouter: '', custom: '' };
         var orModelsLoaded = false;
         var MODELS = [];   // [{ id, price? }]  current suggestion set
         var menuOpen = false;
@@ -174,7 +179,9 @@
                model, and showing both would be asking the same thing twice and
                inviting somebody to fill in a box that is never sent. */
             var isAzure = provider === 'azure';
+            var isCustom = provider === 'custom';
             if (azureBox)   azureBox.hidden = !isAzure;
+            if (customBox) customBox.hidden = !isCustom;
             if (modelGroup) modelGroup.hidden = isAzure;
 
             if (isAzure) {
@@ -183,6 +190,12 @@
             }
             if (provider === 'openrouter') {
                 if (!orModelsLoaded) loadOpenRouterModels(); else if (menuOpen) renderMenu();
+            } else if (provider === 'custom') {
+                // No catalogue to fetch: the server's own model list is the
+                // only authority, so say where the name has to come from.
+                setCuratedModels(provider);
+                modelHint.textContent = tr('custom_model_hint',
+                    'Type the model exactly as the server lists it, e.g. llama3.1 or mistral-small-latest.');
             } else {
                 setCuratedModels(provider);
             }
@@ -204,6 +217,9 @@
                 if (azEndpoint) azEndpoint.value = d.azure_endpoint || '';
                 if (azDeploy)   azDeploy.value   = d.azure_deployment || '';
                 if (azVersion)  azVersion.value  = d.azure_api_version || '';
+                // Shown in the clear too — an address you cannot read back is an
+                // address whose typo you cannot find.
+                if (customUrl) customUrl.value = d.custom_base_url || '';
                 if (d.has_key) {
                     keyEl.placeholder = d.masked_key || '••••';
                     keyHint.textContent = tr('api_key_set', 'A key is saved. Leave blank to keep it.');
@@ -214,6 +230,13 @@
 
         providerEl.addEventListener('change', function () {
             applyProviderUi(providerEl.value, { keepModel: false });
+            // Only on a SWITCH: the initial hydrate has already said whether a
+            // key is saved, and must not be talked over. Custom is the one
+            // provider whose key is optional, so it is the one that says so.
+            keyHint.textContent = providerEl.value === 'custom'
+                ? tr('api_key_optional_help',
+                    'Optional. Leave blank for a server with no key (most local runners); sent as a Bearer token when filled.')
+                : keyHintDefault;
         });
 
         // ---- save ----
@@ -230,7 +253,11 @@
                 // time getting right. The provider row decides what is used.
                 azure_endpoint:    azEndpoint ? azEndpoint.value.trim() : '',
                 azure_deployment:  azDeploy   ? azDeploy.value.trim()   : '',
-                azure_api_version: azVersion  ? azVersion.value.trim()  : ''
+                azure_api_version: azVersion  ? azVersion.value.trim()  : '',
+                // Sent on the same terms as the Azure fields: always, whatever
+                // the provider, so switching away and back cannot empty an
+                // address somebody spent time getting right.
+                custom_base_url:   customUrl  ? customUrl.value.trim()  : ''
             };
             fetch(apiBase + 'save_settings.php', {
                 method: 'POST', credentials: 'same-origin',

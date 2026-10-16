@@ -93,6 +93,7 @@ function renderAiSettingsPanel(string $ns, array $opts = []): void
                 <option value="openai"><?php echo $t('provider_openai'); ?></option>
                 <option value="openrouter"><?php echo $t('provider_openrouter'); ?></option>
                 <option value="azure"><?php echo $t('provider_azure'); ?></option>
+                <option value="custom"><?php echo $t('provider_custom'); ?></option>
             </select>
         </div>
 
@@ -132,6 +133,24 @@ function renderAiSettingsPanel(string $ns, array $opts = []): void
                 <input type="text" data-ai-azure-api-version
                        placeholder="2024-02-01" autocomplete="off" style="max-width: 280px;">
                 <small class="ai-model-hint"><?php echo $t('azure_api_version_help'); ?></small>
+            </div>
+        </div>
+
+        <!--
+            A custom OpenAI-compatible server: a local runner (Ollama, LM
+            Studio, vLLM) or any hosted API that speaks the OpenAI wire format,
+            such as Mistral. Shown ONLY when Custom is the chosen provider, and
+            it is ONE field: the base address. The Model box below stays
+            visible — a custom server IS named by its model — and the key stays
+            optional, so nothing is duplicated here.
+        -->
+        <div data-ai-custom hidden>
+            <div class="form-group">
+                <label><?php echo $t('custom_base_url'); ?></label>
+                <input type="text" data-ai-custom-base-url
+                       placeholder="http://localhost:11434/v1"
+                       autocomplete="off" style="max-width: 420px;">
+                <small class="ai-model-hint"><?php echo $t('custom_base_url_help'); ?></small>
             </div>
         </div>
 

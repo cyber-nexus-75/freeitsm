@@ -46,10 +46,10 @@ Three layers keep them closed, and each covers something the others cannot:
 takes its file list from the directory rather than from a list, so a test added
 tomorrow is checked tomorrow.
 
-**The one exception** is `tests/azure-openai/mock.php`, a stand-in Azure
-endpoint. It answers HTTP by design, so it requires `cli-server` instead — the
-built-in server that `tests/azure-openai/run.php` starts on a free port and stops
-again. It refuses under Apache, nginx and php-fpm.
+**The exceptions** are the stand-in endpoints, `tests/azure-openai/mock.php`
+and `tests/custom-openai/mock.php`. They answer HTTP by design, so each requires
+`cli-server` instead — the built-in server the matching `run.php` starts on a
+free port and stops again. Each refuses under Apache, nginx and php-fpm.
 
 ## Writing a new one
 

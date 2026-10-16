@@ -147,6 +147,11 @@ function aiSettingsKeys(string $ns): array
         'azure_endpoint'    => $ns . '_azure_endpoint',
         'azure_deployment'  => $ns . '_azure_deployment',
         'azure_api_version' => $ns . '_azure_api_version',
+        /* A custom OpenAI-compatible server's base address (local runners and
+           self-hosted APIs). ⚠️ NOT A SECRET, for the same reason the Azure
+           endpoint is not: it is an address an administrator has to be able to
+           READ BACK to spot a typo in, and only the api_key is encrypted. */
+        'custom_base_url'   => $ns . '_custom_base_url',
     ];
 }
 
@@ -210,6 +215,8 @@ function aiSettingsLoad(PDO $conn, string $ns): array
         'azure_endpoint'    => (string)($rows[$keys['azure_endpoint']]    ?? ''),
         'azure_deployment'  => (string)($rows[$keys['azure_deployment']]  ?? ''),
         'azure_api_version' => (string)($rows[$keys['azure_api_version']] ?? ''),
+        // Only meaningful when provider === 'custom'; harmless and empty otherwise.
+        'custom_base_url'   => (string)($rows[$keys['custom_base_url']] ?? ''),
     ];
 }
 
@@ -234,6 +241,7 @@ function aiSettingsForUi(PDO $conn, string $ns): array
         'azure_endpoint'    => $cfg['azure_endpoint'],
         'azure_deployment'  => $cfg['azure_deployment'],
         'azure_api_version' => $cfg['azure_api_version'],
+        'custom_base_url'   => $cfg['custom_base_url'],
     ];
 }
 
@@ -273,7 +281,10 @@ function aiSettingsSave(PDO $conn, string $ns, array $data): void
        not only when the provider is Azure — so switching to OpenAI and back does
        not silently empty an endpoint the administrator spent time getting right.
        The provider row alone decides which configuration is actually used. */
-    foreach (['azure_endpoint', 'azure_deployment', 'azure_api_version'] as $f) {
+    /* Custom's base URL is written on the same terms, for the same reason:
+       switching providers and back must not empty an address somebody spent
+       time getting right. */
+    foreach (['azure_endpoint', 'azure_deployment', 'azure_api_version', 'custom_base_url'] as $f) {
         if (array_key_exists($f, $data)) {
             $upsert($keys[$f], trim((string)$data[$f]));
         }

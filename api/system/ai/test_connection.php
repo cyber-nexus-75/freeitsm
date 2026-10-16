@@ -33,7 +33,9 @@ try {
     requireAiNamespaceJson($conn, $ns);
 
     $cfg  = aiSettingsLoad($conn, $ns);
-    if ($cfg['api_key'] === '') {
+    /* A custom server's key is optional — most local runners have none — so
+       only the named providers demand a key before a test can be made. */
+    if ($cfg['api_key'] === '' && ($cfg['provider'] ?? '') !== 'custom') {
         echo json_encode(['success' => false, 'error' => 'No API key saved yet — save a key first.']);
         exit;
     }
